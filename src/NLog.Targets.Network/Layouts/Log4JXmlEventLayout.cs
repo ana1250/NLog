@@ -36,6 +36,7 @@ namespace NLog.Layouts
     using System;
     using System.Collections.Generic;
     using System.ComponentModel;
+    using System.Linq;
     using System.Text;
     using NLog.Config;
     using NLog.LayoutRenderers;
@@ -52,17 +53,54 @@ namespace NLog.Layouts
     /// <seealso href="https://github.com/NLog/NLog/wiki/Log4JXmlEventLayout">Documentation on NLog Wiki</seealso>
     [Layout("Log4JXmlEventLayout")]
     [ThreadAgnostic]
-    public class Log4JXmlEventLayout : Layout
+    public class Log4JXmlEventLayout : XmlLayout
     {
+
+        private bool _includeCallSite;
+        private bool _includeSourceInfo;
+        private readonly XmlElement _locationElement;
+
         /// <summary>
         /// Initializes a new instance of the <see cref="Log4JXmlEventLayout" /> class.
         /// </summary>
-        public Log4JXmlEventLayout()
+        public Log4JXmlEventLayout() : base("event", null)
         {
             Renderer = new Log4JXmlEventLayoutRenderer();
-            Parameters = new List<Log4JXmlEventParameter>();
-            Renderer.Parameters = Parameters;
+            // Configure default layouts
+            Attributes.Add(new XmlAttribute("logger", "${logger}"));
+            Attributes.Add(new XmlAttribute("level", "${level:uppercase=true}"));
+            Attributes.Add(new XmlAttribute("timestamp", "${date:format=UNIXMS}"));
+            Attributes.Add(new XmlAttribute("thread", "${threadid}"));
+
+            // Add core elements
+            Elements.Add(new XmlElement("message", "${message}"));
+            Elements.Add(new XmlElement("throwable", "${exception:format=ToString}"));
+            Elements.Add(new XmlElement("data", "${appdomain:format={1\\}}")
+            {
+                Name = "log4japp"
+            });
+
+            _locationElement = new XmlElement("locationInfo", null)
+            {
+                Attributes =
+        {
+            new XmlAttribute("class", "${callsite-class}"),
+            new XmlAttribute("method", "${callsite-method}"),
+            new XmlAttribute("file", "${callsite-file}"),
+            new XmlAttribute("line", "${callsite-linenumber}")
         }
+            };
+            _locationElement.Attributes[2].Layout = null; // Disable file initially
+            _locationElement.Attributes[3].Layout = null; // Disable line initially
+
+            // Configure default properties
+            IncludeEventProperties = true;
+            IncludeScopeProperties = true;
+            PropertiesElementName = "data";
+            PropertiesElementKeyAttribute = "name";
+            PropertiesElementValueAttribute = "value";
+        }
+
 
         /// <summary>
         /// Gets the <see cref="Log4JXmlEventLayoutRenderer"/> instance that renders log events.
@@ -77,25 +115,25 @@ namespace NLog.Layouts
         [ArrayParameter(typeof(Log4JXmlEventParameter), "parameter")]
         public IList<Log4JXmlEventParameter> Parameters { get => Renderer.Parameters; set => Renderer.Parameters = value; }
 
-        /// <summary>
-        /// Gets or sets the option to include all properties from the log events
-        /// </summary>
-        /// <docgen category='Layout Options' order='10' />
-        public bool IncludeEventProperties
-        {
-            get => Renderer.IncludeEventProperties;
-            set => Renderer.IncludeEventProperties = value;
-        }
+        ///// <summary>
+        ///// Gets or sets the option to include all properties from the log events
+        ///// </summary>
+        ///// <docgen category='Layout Options' order='10' />
+        //public bool IncludeEventProperties
+        //{
+        //    get => Renderer.IncludeEventProperties;
+        //    set => Renderer.IncludeEventProperties = value;
+        //}
 
-        /// <summary>
-        /// Gets or sets whether to include the contents of the <see cref="ScopeContext"/> properties-dictionary.
-        /// </summary>
-        /// <docgen category='Layout Options' order='10' />
-        public bool IncludeScopeProperties
-        {
-            get => Renderer.IncludeScopeProperties;
-            set => Renderer.IncludeScopeProperties = value;
-        }
+        ///// <summary>
+        ///// Gets or sets whether to include the contents of the <see cref="ScopeContext"/> properties-dictionary.
+        ///// </summary>
+        ///// <docgen category='Layout Options' order='10' />
+        //public bool IncludeScopeProperties
+        //{
+        //    get => Renderer.IncludeScopeProperties;
+        //    set => Renderer.IncludeScopeProperties = value;
+        //}
 
         /// <summary>
         /// Gets or sets whether to include log4j:NDC in output from <see cref="ScopeContext"/> nested context.
@@ -108,24 +146,24 @@ namespace NLog.Layouts
         }
 
         /// <summary>
-        /// Obsolete and replaced by <see cref="IncludeEventProperties"/> with NLog v5.
+        /// Obsolete and replaced by <see cref="XmlElementBase.IncludeEventProperties"/> with NLog v5.
         ///
         /// Gets or sets the option to include all properties from the log events
         /// </summary>
         /// <docgen category='Layout Options' order='10' />
         [Obsolete("Replaced by IncludeEventProperties. Marked obsolete on NLog 5.0")]
         [EditorBrowsable(EditorBrowsableState.Never)]
-        public bool IncludeAllProperties { get => IncludeEventProperties; set => IncludeEventProperties = value; }
+        public bool ObsoleteIncludeAllProperties { get => IncludeEventProperties; set => IncludeEventProperties = value; }
 
         /// <summary>
-        /// Obsolete and replaced by <see cref="IncludeScopeProperties"/> with NLog v5.
+        /// Obsolete and replaced by <see cref="XmlElementBase.IncludeScopeProperties"/> with NLog v5.
         ///
         /// Gets or sets a value indicating whether to include contents of the <see cref="MappedDiagnosticsContext"/> dictionary.
         /// </summary>
         /// <docgen category='Layout Options' order='10' />
         [Obsolete("Replaced by IncludeScopeProperties. Marked obsolete on NLog 5.0")]
         [EditorBrowsable(EditorBrowsableState.Never)]
-        public bool IncludeMdc { get => Renderer.IncludeMdc; set => Renderer.IncludeMdc = value; }
+        public bool ObsoleteIncludeMdc { get => Renderer.IncludeMdc; set => Renderer.IncludeMdc = value; }
 
         /// <summary>
         /// Gets or sets whether to include log4j:NDC in output from <see cref="ScopeContext"/> nested context.
@@ -134,14 +172,14 @@ namespace NLog.Layouts
         public bool IncludeNdc { get => Renderer.IncludeNdc; set => Renderer.IncludeNdc = value; }
 
         /// <summary>
-        /// Obsolete and replaced by <see cref="IncludeScopeProperties"/> with NLog v5.
+        /// Obsolete and replaced by <see cref="XmlElementBase.IncludeScopeProperties"/> with NLog v5.
         ///
         /// Gets or sets a value indicating whether to include contents of the <see cref="MappedDiagnosticsLogicalContext"/> dictionary.
         /// </summary>
         /// <docgen category='Layout Options' order='10' />
         [Obsolete("Replaced by IncludeScopeProperties. Marked obsolete on NLog 5.0")]
         [EditorBrowsable(EditorBrowsableState.Never)]
-        public bool IncludeMdlc { get => Renderer.IncludeMdlc; set => Renderer.IncludeMdlc = value; }
+        public bool ObsoleteIncludeMdlc { get => Renderer.IncludeMdlc; set => Renderer.IncludeMdlc = value; }
 
         /// <summary>
         /// Obsolete and replaced by <see cref="IncludeNdc"/> with NLog v5.
@@ -199,8 +237,12 @@ namespace NLog.Layouts
         /// <docgen category='Layout Options' order='100' />
         public bool IncludeCallSite
         {
-            get => Renderer.IncludeCallSite;
-            set => Renderer.IncludeCallSite = value;
+            get => _includeCallSite;
+            set
+            {
+                _includeCallSite = value;
+                UpdateCallSiteElement();
+            }
         }
 
         /// <summary>
@@ -209,8 +251,12 @@ namespace NLog.Layouts
         /// <docgen category='Layout Options' order='100' />
         public bool IncludeSourceInfo
         {
-            get => Renderer.IncludeSourceInfo;
-            set => Renderer.IncludeSourceInfo = value;
+            get => _includeSourceInfo;
+            set
+            {
+                _includeSourceInfo = value;
+                UpdateCallSiteElement();
+            }
         }
 
         /// <inheritdoc/>
@@ -220,9 +266,80 @@ namespace NLog.Layouts
         }
 
         /// <inheritdoc/>
+        /// <inheritdoc/>
         protected override void RenderFormattedMessage(LogEventInfo logEvent, StringBuilder target)
         {
-            Renderer.AppendBuilder(logEvent, target);
+            // Add standard properties
+            EnsureStandardProperties();
+
+            // Add parameters as properties
+            foreach (var param in Parameters)
+            {
+                if (!string.IsNullOrEmpty(param.Name))
+                {
+                    Elements.Add(new XmlElement("data", param.Layout)
+                    {
+                        Name = param.Name,
+                        Encode = true
+                    });
+                }
+            }
+
+            base.RenderFormattedMessage(logEvent, target);
+        }
+
+        private void EnsureStandardProperties()
+        {
+            if (!HasElement("log4japp"))
+                Elements.Add(new XmlElement("data", "${appdomain:format={1\\}}") { Name = "log4japp" });
+
+            if (!HasElement("log4jmachinename"))
+                Elements.Add(new XmlElement("data", "${machinename}") { Name = "log4jmachinename" });
+        }
+
+        private void AddCallSiteElement(LogEventInfo logEvent)
+        {
+            var locationElement = new XmlElement("locationInfo", null);
+
+            if (!string.IsNullOrEmpty(logEvent.CallerClassName))
+                locationElement.Attributes.Add(new XmlAttribute("class", logEvent.CallerClassName));
+
+            locationElement.Attributes.Add(new XmlAttribute("method", logEvent.CallerMemberName));
+
+            if (IncludeSourceInfo)
+            {
+                locationElement.Attributes.Add(new XmlAttribute("file", logEvent.CallerFilePath));
+                locationElement.Attributes.Add(new XmlAttribute("line", logEvent.CallerLineNumber.ToString()));
+            }
+
+            Elements.Add(locationElement);
+        }
+
+        private bool HasElement(string name) => Elements.Any(e => e.Name.Equals(name, StringComparison.OrdinalIgnoreCase));
+
+        private XmlElement GetElement(string name) => Elements.FirstOrDefault(e => e.Name.Equals(name, StringComparison.OrdinalIgnoreCase));
+
+        private void RemoveElement(string name)
+        {
+            var element = GetElement(name);
+            if (element != null)
+                Elements.Remove(element);
+        }
+
+        private void UpdateCallSiteElement()
+        {
+            if (_includeCallSite || _includeSourceInfo)
+            {
+                if (!Elements.Contains(_locationElement))
+                    Elements.Add(_locationElement);
+
+                _locationElement.Attributes[2].Layout = _includeSourceInfo ? "${callsite-file}" : null;
+                _locationElement.Attributes[3].Layout = _includeSourceInfo ? "${callsite-linenumber}" : null;
+            }
+            else
+            {
+                Elements.Remove(_locationElement);
+            }
         }
     }
 }

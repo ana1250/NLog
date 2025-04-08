@@ -61,6 +61,8 @@ namespace NLog.LayoutRenderers
         private static readonly string dummyNamespaceRemover = " xmlns:log4j=\"" + dummyNamespace + "\"";
 
         private readonly ScopeContextNestedStatesLayoutRenderer _scopeNestedLayoutRenderer = new ScopeContextNestedStatesLayoutRenderer();
+        private  Log4JXmlEventLayout _log4JXmlEventLayout;
+
 
         /// <summary>
         /// Initializes a new instance of the <see cref="Log4JXmlEventLayoutRenderer" /> class.
@@ -99,16 +101,11 @@ namespace NLog.LayoutRenderers
         protected override void InitializeLayoutRenderer()
         {
             base.InitializeLayoutRenderer();
+        }
 
-            _xmlWriterSettings = new XmlWriterSettings
-            {
-                Indent = IndentXml,
-                ConformanceLevel = ConformanceLevel.Fragment,
-#if !NET35
-                NamespaceHandling = NamespaceHandling.OmitDuplicates,
-#endif
-                IndentChars = "  ",
-            };
+        internal void SetLayout(Log4JXmlEventLayout layout)
+        {
+            _log4JXmlEventLayout = layout;
         }
 
         /// <summary>
@@ -259,8 +256,6 @@ namespace NLog.LayoutRenderers
 
         private readonly string _machineName;
 
-        private XmlWriterSettings _xmlWriterSettings;
-
         /// <inheritdoc/>
         StackTraceUsage IUsesStackTrace.StackTraceUsage
         {
@@ -285,162 +280,7 @@ namespace NLog.LayoutRenderers
         /// <inheritdoc/>
         protected override void Append(StringBuilder builder, LogEventInfo logEvent)
         {
-            StringBuilder sb = new StringBuilder();
-            using (XmlWriter xtw = XmlWriter.Create(sb, _xmlWriterSettings))
-            {
-                xtw.WriteStartElement("log4j", "event", dummyNamespace);
-                xtw.WriteAttributeSafeString("logger", LoggerName?.Render(logEvent) ?? logEvent.LoggerName);
-                xtw.WriteAttributeString("level", logEvent.Level.Name.ToUpperInvariant());
-                xtw.WriteAttributeString("timestamp", Convert.ToString((long)(logEvent.TimeStamp.ToUniversalTime() - log4jDateBase).TotalMilliseconds, CultureInfo.InvariantCulture));
-                xtw.WriteAttributeString("thread", System.Threading.Thread.CurrentThread.ManagedThreadId.ToString(CultureInfo.InvariantCulture));
-
-                xtw.WriteElementSafeString("log4j", "message", dummyNamespace, FormattedMessage?.Render(logEvent) ?? logEvent.FormattedMessage);
-                if (logEvent.Exception != null)
-                {
-                    if (WriteThrowableCData)
-                    {
-                        // CDATA correctly preserves newlines and indention, but not all viewers support this
-                        xtw.WriteStartElement("log4j", "throwable", dummyNamespace);
-                        xtw.WriteSafeCData(logEvent.Exception.ToString());
-                        xtw.WriteEndElement();
-                    }
-                    else
-                    {
-                        xtw.WriteElementSafeString("log4j", "throwable", dummyNamespace, logEvent.Exception.ToString());
-                    }
-                }
-
-                AppendScopeContextNestedStates(xtw, logEvent);
-
-                if (IncludeCallSite || IncludeSourceInfo)
-                {
-                    AppendCallSite(logEvent, xtw);
-                }
-
-                xtw.WriteStartElement("log4j", "properties", dummyNamespace);
-
-                AppendScopeContextProperties(xtw);
-
-                if (IncludeEventProperties)
-                {
-                    AppendDataProperties("log4j", dummyNamespace, xtw, logEvent);
-                }
-
-                AppendParameters(logEvent, xtw);
-
-                var appInfo = AppInfo?.Render(logEvent);
-                AppendDataProperty(xtw, "log4japp", appInfo, dummyNamespace);
-
-                AppendDataProperty(xtw, "log4jmachinename", _machineName, dummyNamespace);
-
-                xtw.WriteEndElement();  // properties
-
-                xtw.WriteEndElement();  // event
-                xtw.Flush();
-
-                // get rid of 'nlog' and 'log4j' namespace declarations
-                sb.Replace(dummyNamespaceRemover, string.Empty);
-                builder.Append(sb.ToString());  // StringBuilder.Replace is not good when reusing the StringBuilder
-            }
-        }
-
-        private void AppendScopeContextProperties(XmlWriter xtw)
-        {
-            if (IncludeScopeProperties)
-            {
-                foreach (var scopeProperty in ScopeContext.GetAllProperties())
-                {
-                    string propertyKey = XmlHelpers.RemoveInvalidXmlChars(scopeProperty.Key);
-                    if (string.IsNullOrEmpty(propertyKey))
-                        continue;
-
-                    string propertyValue = XmlHelpers.XmlConvertToStringSafe(scopeProperty.Value);
-                    if (propertyValue is null)
-                        continue;
-
-                    AppendDataProperty(xtw, propertyKey, propertyValue, dummyNamespace);
-                }
-            }
-        }
-
-        private void AppendScopeContextNestedStates(XmlWriter xtw, LogEventInfo logEvent)
-        {
-            if (IncludeScopeNested)
-            {
-                var nestedStates = _scopeNestedLayoutRenderer.Render(logEvent);
-                //NDLC and NDC should be in the same element
-                xtw.WriteElementSafeString("log4j", "NDC", dummyNamespace, nestedStates);
-            }
-        }
-
-        private void AppendParameters(LogEventInfo logEvent, XmlWriter xtw)
-        {
-            for (int i = 0; i < Parameters?.Count; ++i)
-            {
-                var parameter = Parameters[i];
-
-                string parameterName = parameter?.Name; // property-setter has ensured safe xml-string
-                if (string.IsNullOrEmpty(parameterName))
-                    continue;
-
-                var parameterValue = parameter.Layout?.Render(logEvent);
-                if (!parameter.IncludeEmptyValue && string.IsNullOrEmpty(parameterValue))
-                    continue;
-
-                AppendDataProperty(xtw, parameterName, parameterValue, dummyNamespace);
-            }
-        }
-
-        private void AppendCallSite(LogEventInfo logEvent, XmlWriter xtw)
-        {
-            string callerMemberName = logEvent.CallerMemberName;
-            if (string.IsNullOrEmpty(callerMemberName))
-                return;
-
-            string callerClassName = logEvent.CallerClassName;
-
-            xtw.WriteStartElement("log4j", "locationInfo", dummyNamespace);
-            if (!string.IsNullOrEmpty(callerClassName))
-            {
-                xtw.WriteAttributeSafeString("class", callerClassName);
-            }
-
-            xtw.WriteAttributeSafeString("method", callerMemberName);
-
-            if (IncludeSourceInfo)
-            {
-                xtw.WriteAttributeSafeString("file", logEvent.CallerFilePath);
-                xtw.WriteAttributeString("line", logEvent.CallerLineNumber.ToString(CultureInfo.InvariantCulture));
-            }
-
-            xtw.WriteEndElement();
-        }
-
-        private static void AppendDataProperties(string prefix, string propertiesNamespace, XmlWriter xtw, LogEventInfo logEvent)
-        {
-            if (logEvent.HasProperties)
-            {
-                foreach (var contextProperty in logEvent.Properties)
-                {
-                    string propertyKey = XmlHelpers.XmlConvertToStringSafe(contextProperty.Key);
-                    if (string.IsNullOrEmpty(propertyKey))
-                        continue;
-
-                    string propertyValue = XmlHelpers.XmlConvertToStringSafe(contextProperty.Value);
-                    if (propertyValue is null)
-                        continue;
-
-                    AppendDataProperty(xtw, propertyKey, propertyValue, propertiesNamespace, prefix);
-                }
-            }
-        }
-
-        private static void AppendDataProperty(XmlWriter xtw, string propertyKey, string propertyValue, string propertiesNamespace, string prefix = "log4j")
-        {
-            xtw.WriteStartElement(prefix, "data", propertiesNamespace);
-            xtw.WriteAttributeString("name", propertyKey);
-            xtw.WriteAttributeSafeString("value", propertyValue);
-            xtw.WriteEndElement();
+            _log4JXmlEventLayout.Render(logEvent, builder);
         }
     }
 }
